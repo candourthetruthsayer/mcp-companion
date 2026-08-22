@@ -1,5 +1,9 @@
 # mcp-companion
 
+![CI](https://github.com/candourthetruthsayer/mcp-companion/actions/workflows/ci.yml/badge.svg)
+![npm version](https://img.shields.io/npm/v/mcp-companion)
+![npm downloads](https://img.shields.io/npm/dm/mcp-companion)
+
 **Scan and validate your MCP server configuration before it silently fails.**
 
 `mcp-companion` finds your MCP config files (`.mcp.json`, `mcp.json`, `.cursor/mcp.json`, `managed-mcp.json`), validates every server entry against the real MCP schema rules, and tells you what's broken, insecure, or deprecated — in one command. Zero dependencies, CI-friendly.
