@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const { promises: fs } = require('fs');
 const os = require('os');
 const path = require('path');
-const { scan, checkServer, looksLikeSecret, referencesEnv, compareVersions, isConcretePin } = require('../lib/scan');
+const { scan, checkServer, looksLikeSecret, referencesEnv, compareVersions, isConcretePin, isHttpUrl, checkServerHealth } = require('../lib/scan');
 const { format, formatSummary } = require('../index.js');
 
 async function tmpdirWith(files) {
@@ -283,4 +283,69 @@ node_test('scan checkUpdates=true: unresolved package is info, not warning', asy
   const ghost = r.configs[0].servers[0];
   assert.ok(ghost.issues.some((i) => i.code === 'version-unknown'));
   assert.ok(!ghost.issues.some((i) => i.code === 'stale-package'));
+});
+
+// --- remote URL health check (--check-health) ---
+
+// httpFn whose .get(url,opts,cb) responds with the given status (or an error).
+function statusHttpFn(statusByUrl) {
+  return {
+    get(url, opts, cb) {
+      const status = statusByUrl[url] !== undefined ? statusByUrl[url] : 200;
+      const res = {
+        statusCode: status,
+        on() { return res; },
+      };
+      setImmediate(() => cb(res));
+      return { on() {}, destroy() {} };
+    },
+  };
+}
+
+node_test('isHttpUrl: http/https accepted, ws/template rejected', () => {
+  assert.strictEqual(isHttpUrl('https://mcp.example.com/mcp'), true);
+  assert.strictEqual(isHttpUrl('http://localhost:3000'), true);
+  assert.strictEqual(isHttpUrl('wss://mcp.example.com/socket'), false);
+  assert.strictEqual(isHttpUrl('${API_BASE_URL}/mcp'), false);
+  assert.strictEqual(isHttpUrl(123), false);
+});
+
+node_test('checkServerHealth: reachable http URL returns true', async () => {
+  const ok = await checkServerHealth('https://ok.example.com', { httpFn: statusHttpFn({ 'https://ok.example.com': 200 }) });
+  assert.strictEqual(ok, true);
+});
+
+node_test('scan checkHealth=false: no network, zero healthChecked', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({ mcpServers: { a: { type: 'http', url: 'https://a.example.com' } } }),
+  });
+  const r = await scan(dir); // no checkHealth, no httpFn
+  assert.strictEqual(r.summary.healthChecked, 0);
+  assert.strictEqual(r.summary.healthFailed, 0);
+});
+
+node_test('scan checkHealth=true: reachable URL clean, failing URL warned', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({
+      mcpServers: {
+        good: { type: 'http', url: 'https://good.example.com' },
+        bad: { type: 'http', url: 'https://down.example.com' },
+        ws: { type: 'ws', url: 'wss://live.example.com/socket' },
+      },
+    }),
+  });
+  const httpFn = { get: (url, opts, cb) => {
+    const status = url.includes('down.example.com') ? 503 : 200;
+    const res = { statusCode: status, on() { return res; } };
+    setImmediate(() => cb(res));
+    return { on() {}, destroy() {} };
+  } };
+  const r = await scan(dir, { checkHealth: true, httpFn, timeoutMs: 1000 });
+  assert.strictEqual(r.summary.healthChecked, 2); // good + bad (ws skipped)
+  assert.strictEqual(r.summary.healthSkipped, 1); // ws:// not http(s)
+  assert.strictEqual(r.summary.healthFailed, 1);
+  const servers = r.configs[0].servers;
+  assert.ok(servers.find((s) => s.name === 'good').issues.every((i) => i.code !== 'url-unreachable'));
+  assert.ok(servers.find((s) => s.name === 'bad').issues.some((i) => i.code === 'url-unreachable'));
+  assert.ok(!servers.find((s) => s.name === 'ws').issues.some((i) => i.code === 'url-unreachable'));
 });

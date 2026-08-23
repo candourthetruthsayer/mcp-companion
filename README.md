@@ -29,6 +29,7 @@ MCP is exploding — ~97M monthly SDK downloads, 10,000+ public servers, 41% of 
 | **warning** | Reserved server name `workspace` (client skips it at startup) |
 | **warning** | **Hardcoded credential** in `env`/`headers` — should be `${VAR}` expansion |
 | **warning** | **Stale npm pin** (`--check-updates`): pinned npx version is behind the published latest |
+| **warning** | **Unreachable server URL** (`--check-health`): http(s) server endpoint didn't respond (bad status / timeout) |
 | **info** | `$\{VAR\}` reference with no default and no currently-set value |
 | **info** | Missing `type` field (inferred as stdio from `command`) |
 
@@ -39,10 +40,11 @@ mcp-companion                 Check the current directory
 mcp-companion ./my-app        Check a specific project
 mcp-companion --summary       CI-friendly one-liner
 mcp-companion --check-updates Check pinned npx versions against npm (online)
+mcp-companion --check-health  Probe http(s) server URLs for reachability (online)
 mcp-companion --json          Machine-readable output
 ```
 
-`--check-updates` is **opt-in and online**: it queries the npm registry so, by default and in CI, the tool stays fast, deterministic, and offline. Use it when you want to catch stale npx version pins.
+Both online checks (`--check-updates`, `--check-health`) are **opt-in**: they make network calls, so by default — and in CI — the tool stays fast, deterministic, and offline. Use them when you want to catch stale npx pins or dead remote server endpoints.
 
 **Exit codes:**
 - `0` — clean (no errors or warnings)

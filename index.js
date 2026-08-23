@@ -21,6 +21,7 @@ Options:
   --json            Output results as JSON
   --summary         One-line summary (ideal for CI)
   --check-updates   Check pinned npm package versions against the registry (online)
+  --check-health    Probe http(s) MCP server URLs for reachability (online)
   --no-color        Disable colored output
   --help            Show this help
   --version         Show version
@@ -35,6 +36,7 @@ Examples:
   mcp-companion ./my-app
   mcp-companion --summary       CI-friendly one-liner
   mcp-companion --check-updates Check pinned npx versions against npm
+  mcp-companion --check-health  Probe remote MCP server URLs
   mcp-companion --json          Machine-readable
 `;
 
@@ -87,6 +89,9 @@ function format(result) {
   if (result.checkUpdates) {
     found += ` · updates: ${summary.updatesChecked} checked, ${summary.updatesStale} stale, ${summary.updatesUnresolved} unresolved`;
   }
+  if (result.checkHealth) {
+    found += ` · health: ${summary.healthChecked} probed, ${summary.healthFailed} failed, ${summary.healthSkipped} skipped`;
+  }
   lines.push(found);
   return lines.join('\n');
 }
@@ -95,6 +100,7 @@ function formatSummary(result) {
   const s = result.summary;
   let out = `mcp-companion: ${s.configsFound} config(s), ${s.servers} server(s), ${s.errors} error(s), ${s.warnings} warning(s)`;
   if (result.checkUpdates) out += `, ${s.updatesStale} stale`;
+  if (result.checkHealth) out += `, ${s.healthFailed} health-failed`;
   return out;
 }
 
@@ -115,9 +121,10 @@ async function main() {
   const json = flags.has('--json');
   const summary = flags.has('--summary');
   const checkUpdates = flags.has('--check-updates');
+  const checkHealth = flags.has('--check-health');
 
   try {
-    const result = await scan(dir, { checkUpdates });
+    const result = await scan(dir, { checkUpdates, checkHealth });
     if (json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (summary) {
