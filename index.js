@@ -18,11 +18,12 @@ config entries in the given directory, then checks each server entry for:
   - Env-var references with no default that may fail to load
 
 Options:
-  --json        Output results as JSON
-  --summary     One-line summary (ideal for CI)
-  --no-color    Disable colored output
-  --help        Show this help
-  --version     Show version
+  --json            Output results as JSON
+  --summary         One-line summary (ideal for CI)
+  --check-updates   Check pinned npm package versions against the registry (online)
+  --no-color        Disable colored output
+  --help            Show this help
+  --version         Show version
 
 Exit codes:
   0  Clean — no errors or warnings
@@ -33,6 +34,7 @@ Examples:
   mcp-companion                 Check the current directory
   mcp-companion ./my-app
   mcp-companion --summary       CI-friendly one-liner
+  mcp-companion --check-updates Check pinned npx versions against npm
   mcp-companion --json          Machine-readable
 `;
 
@@ -81,14 +83,19 @@ function format(result) {
   }
 
   lines.push('─'.repeat(50));
-  const found = `Found: ${summary.errors} error(s), ${summary.warnings} warning(s), ${summary.infos} info`;
+  let found = `Found: ${summary.errors} error(s), ${summary.warnings} warning(s), ${summary.infos} info`;
+  if (result.checkUpdates) {
+    found += ` · updates: ${summary.updatesChecked} checked, ${summary.updatesStale} stale, ${summary.updatesUnresolved} unresolved`;
+  }
   lines.push(found);
   return lines.join('\n');
 }
 
 function formatSummary(result) {
   const s = result.summary;
-  return `mcp-companion: ${s.configsFound} config(s), ${s.servers} server(s), ${s.errors} error(s), ${s.warnings} warning(s)`;
+  let out = `mcp-companion: ${s.configsFound} config(s), ${s.servers} server(s), ${s.errors} error(s), ${s.warnings} warning(s)`;
+  if (result.checkUpdates) out += `, ${s.updatesStale} stale`;
+  return out;
 }
 
 async function main() {
@@ -107,9 +114,10 @@ async function main() {
   const dir = positional[0] || '.';
   const json = flags.has('--json');
   const summary = flags.has('--summary');
+  const checkUpdates = flags.has('--check-updates');
 
   try {
-    const result = await scan(dir);
+    const result = await scan(dir, { checkUpdates });
     if (json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (summary) {

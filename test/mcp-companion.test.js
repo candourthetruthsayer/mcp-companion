@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const { promises: fs } = require('fs');
 const os = require('os');
 const path = require('path');
-const { scan, checkServer, looksLikeSecret, referencesEnv } = require('../lib/scan');
+const { scan, checkServer, looksLikeSecret, referencesEnv, compareVersions, isConcretePin } = require('../lib/scan');
 const { format, formatSummary } = require('../index.js');
 
 async function tmpdirWith(files) {
@@ -179,4 +179,108 @@ node_test('index: format and formatSummary produce output', () => {
   };
   assert.ok(format(result).includes('mcp-companion'));
   assert.ok(formatSummary(result).includes('1 server(s)'));
+});
+
+// --- online version / staleness check (--check-updates) ---
+
+// Build a fake http module whose .get(url,opts,cb) immediately returns a
+// fake response resolving to an object with the given version.
+function fakeHttp(version) {
+  return {
+    get(url, opts, cb) {
+      const res = {
+        statusCode: 200,
+        on(ev, fn) {
+          if (ev === 'data') fn(JSON.stringify({ version }));
+          if (ev === 'end') setImmediate(fn);
+          return res;
+        },
+      };
+      setImmediate(() => cb(res));
+      const req = { on() {}, destroy() {} };
+      return req;
+    },
+  };
+}
+
+node_test('compareVersions: numeric semver ordering', () => {
+  assert.strictEqual(compareVersions('1.0.0', '1.0.0'), 0);
+  assert.strictEqual(compareVersions('1.2.3', '1.2.4'), -1);
+  assert.strictEqual(compareVersions('2.0.0', '1.9.9'), 1);
+  assert.strictEqual(compareVersions('1.10.0', '1.9.9'), 1);
+});
+
+node_test('isConcretePin: accepts numeric pins, rejects ranges/latest', () => {
+  assert.strictEqual(isConcretePin('1.2.3'), true);
+  assert.strictEqual(isConcretePin('^1.2.0'), false);
+  assert.strictEqual(isConcretePin('latest'), false);
+  assert.strictEqual(isConcretePin('~1.2.0'), false);
+});
+
+node_test('checkServer: captures packageRefs with version specs', () => {
+  const r = checkServer('mem', { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory@1.0.0'] }, {});
+  assert.ok(Array.isArray(r.packageRefs));
+  const ref = r.packageRefs.find((x) => x.name === '@modelcontextprotocol/server-memory');
+  assert.ok(ref, 'expected packageRef for the pinned package');
+  assert.strictEqual(ref.spec, '1.0.0');
+});
+
+node_test('checkServer: bare npx package default spec is "latest"', () => {
+  const r = checkServer('git', { type: 'stdio', command: 'npx', args: ['-y', '@some/mcp-github'] }, {});
+  const ref = r.packageRefs.find((x) => x.name === '@some/mcp-github');
+  assert.strictEqual(ref.spec, 'latest');
+});
+
+node_test('scan checkUpdates=false: no network calls, zero updatesChecked', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({ mcpServers: { a: { type: 'stdio', command: 'npx', args: ['-y', 'pkg@1.0.0'] } } }),
+  });
+  const r = await scan(dir); // no checkUpdates, no httpFn
+  assert.strictEqual(r.summary.updatesChecked, 0);
+  assert.strictEqual(r.summary.updatesStale, 0);
+});
+
+node_test('scan checkUpdates=true: stale pin flagged, current pin not', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({
+      mcpServers: {
+        oldserver: { type: 'stdio', command: 'npx', args: ['-y', 'legacy-pkg@1.0.0'] },
+        current: { type: 'stdio', command: 'npx', args: ['-y', 'new-pkg@2.0.0'] },
+      },
+    }),
+  });
+  // Registry reports legacy-pkg latest=1.2.0 (stale), new-pkg latest=2.0.0 (current).
+  const latestByPkg = { 'legacy-pkg': '1.2.0', 'new-pkg': '2.0.0' };
+  const httpFn = { get: (url, opts, cb) => {
+    const pkg = decodeURIComponent(url.split('/')[3] || '');
+    return fakeHttp(latestByPkg[pkg] || '0.0.0').get(url, opts, cb);
+  } };
+  const r = await scan(dir, { checkUpdates: true, httpFn, timeoutMs: 1000 });
+  assert.strictEqual(r.summary.updatesChecked, 2);
+  assert.strictEqual(r.summary.updatesStale, 1);
+  const servers = r.configs[0].servers;
+  const old = servers.find((s) => s.name === 'oldserver');
+  assert.ok(old.issues.some((i) => i.code === 'stale-package'), 'legacy-pkg should be stale');
+  const cur = servers.find((s) => s.name === 'current');
+  assert.ok(!cur.issues.some((i) => i.code === 'stale-package'), 'new-pkg should not be stale');
+});
+
+node_test('scan checkUpdates=true: unresolved package is info, not warning', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({ mcpServers: { ghost: { type: 'stdio', command: 'npx', args: ['-y', 'ghost-pkg@1.0.0'] } } }),
+  });
+  // 404 → the mock returns statusCode 404 so version resolves to null.
+  const httpFn = { get: (url, opts, cb) => {
+    const res = {
+      statusCode: 404,
+      on(ev, fn) { if (ev === 'end') setImmediate(fn); return res; },
+    };
+    setImmediate(() => cb(res));
+    return { on() {}, destroy() {} };
+  } };
+  const r = await scan(dir, { checkUpdates: true, httpFn, timeoutMs: 1000 });
+  assert.strictEqual(r.summary.updatesUnresolved, 1);
+  const ghost = r.configs[0].servers[0];
+  assert.ok(ghost.issues.some((i) => i.code === 'version-unknown'));
+  assert.ok(!ghost.issues.some((i) => i.code === 'stale-package'));
 });

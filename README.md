@@ -28,6 +28,7 @@ MCP is exploding — ~97M monthly SDK downloads, 10,000+ public servers, 41% of 
 | **warning** | **Deprecated SSE transport** (MCP 2025-06 spec → migrate to HTTP) |
 | **warning** | Reserved server name `workspace` (client skips it at startup) |
 | **warning** | **Hardcoded credential** in `env`/`headers` — should be `${VAR}` expansion |
+| **warning** | **Stale npm pin** (`--check-updates`): pinned npx version is behind the published latest |
 | **info** | `$\{VAR\}` reference with no default and no currently-set value |
 | **info** | Missing `type` field (inferred as stdio from `command`) |
 
@@ -37,8 +38,11 @@ MCP is exploding — ~97M monthly SDK downloads, 10,000+ public servers, 41% of 
 mcp-companion                 Check the current directory
 mcp-companion ./my-app        Check a specific project
 mcp-companion --summary       CI-friendly one-liner
+mcp-companion --check-updates Check pinned npx versions against npm (online)
 mcp-companion --json          Machine-readable output
 ```
+
+`--check-updates` is **opt-in and online**: it queries the npm registry so, by default and in CI, the tool stays fast, deterministic, and offline. Use it when you want to catch stale npx version pins.
 
 **Exit codes:**
 - `0` — clean (no errors or warnings)
@@ -95,7 +99,7 @@ npm i -g mcp-companion
 
 - **Zero dependencies** — Node built-ins only. For a tool that validates other tools' configs, dependency-sphagetti is the opposite of reassuring.
 - **Low false positives** — it only flags the classes the MCP docs themselves call out (broken required fields, deprecated transports, hardcoded secrets, reserved names). Healthy servers pass clean.
-- **The seam for a future registry check** — the `packageNames` field (in `--json`) collects every npm package a stdio server invokes via `npx`, ready for a staleness/abandoned-server scan later.
+- **Collects npm refs for online checks** — the `packageRefs` (name + version spec) and `packageNames` fields (in `--json`) capture every package a stdio server invokes via `npx`; `--check-updates` uses them to flag stale pins against the public registry.
 
 ## License
 
