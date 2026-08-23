@@ -6,7 +6,7 @@
 
 **Scan and validate your MCP server configuration before it silently fails.**
 
-`mcp-companion` finds your MCP config files (`.mcp.json`, `mcp.json`, `.cursor/mcp.json`, `managed-mcp.json`), validates every server entry against the real MCP schema rules, and tells you what's broken, insecure, or deprecated — in one command. Zero dependencies, CI-friendly.
+`mcp-companion` finds your MCP config files — `.mcp.json`, `mcp.json`, `.cursor/mcp.json` (Cursor), `.vscode/mcp.json` (VS Code), `mcp_config.json` (Windsurf), Zed's `context_servers` in `settings.json`, plus `managed-mcp.json` — validates every server entry against the real MCP schema rules, and tells you what's broken, insecure, or deprecated — in one command. Zero dependencies, CI-friendly.
 
 ```
 npx mcp-companion
@@ -32,7 +32,7 @@ MCP is exploding — ~97M monthly SDK downloads, 10,000+ public servers, 41% of 
 | **warning** | **Stale npm pin** (`--check-updates`): pinned npx version is behind the published latest |
 | **warning** | **Unreachable server URL** (`--check-health`): http(s) server endpoint didn't respond (bad status / timeout) |
 | **info** | `$\{VAR\}` reference with no default and no currently-set value |
-| **info** | Missing `type` field (inferred as stdio from `command`) |
+| **info** | Missing `type` field — inferred as stdio (from `command`) or http (from `url`/`serverUrl`) |
 
 ## Usage
 

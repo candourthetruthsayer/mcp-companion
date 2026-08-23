@@ -1,6 +1,6 @@
 {
   "name": "mcp-companion",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Scan and validate your MCP server configuration. Zero-dependency, CI-friendly, catches broken, insecure, and deprecated server configs.",
   "main": "index.js",
   "bin": { "mcp-companion": "./index.js" },

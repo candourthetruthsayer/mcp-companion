@@ -433,3 +433,67 @@ node_test('scan: .mcp.json still found alongside a permissions file', async () =
   assert.strictEqual(r.summary.servers, 1);
   assert.strictEqual(r.summary.errors, 0);
 });
+
+// --- client-schema support: Windsurf / Zed / VS Code ---
+
+node_test('scan: Windsurf mcp_config.json is discovered (same mcpServers shape)', async () => {
+  const dir = await tmpdirWith({
+    'mcp_config.json': JSON.stringify({ mcpServers: { memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] } } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 1);
+  assert.strictEqual(r.summary.servers, 1);
+  assert.strictEqual(r.summary.errors, 0);
+});
+
+node_test('scan: Windsurf serverUrl is accepted as the url alias (no false missing-field)', async () => {
+  const dir = await tmpdirWith({
+    'mcp_config.json': JSON.stringify({ mcpServers: { remote: { serverUrl: 'https://mcp.example.com/mcp' } } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 1);
+  assert.strictEqual(r.summary.servers, 1);
+  assert.strictEqual(r.summary.errors, 0, 'serverUrl must satisfy the url requirement');
+  const server = r.configs[0].servers[0];
+  assert.strictEqual(server.url, 'https://mcp.example.com/mcp');
+});
+
+node_test('scan: Windsurf ${env:VAR} interpolation is not flagged as a secret', async () => {
+  const dir = await tmpdirWith({
+    'mcp_config.json': JSON.stringify({
+      mcpServers: { github: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${env:MY_TOKEN}' } } },
+    }),
+  });
+  const r = await scan(dir);
+  const sec = r.configs[0].servers[0].issues.filter((i) => i.code === 'hardcoded-secret');
+  assert.strictEqual(sec.length, 0, '${env:VAR} is a reference, not a hardcoded credential');
+});
+
+node_test('scan: VS Code .vscode/mcp.json is discovered', async () => {
+  const dir = await tmpdirWith({
+    '.vscode/mcp.json': JSON.stringify({ mcpServers: { filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] } } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 1);
+  assert.strictEqual(r.summary.servers, 1);
+  assert.strictEqual(r.summary.errors, 0);
+});
+
+node_test('scan: Zed context_servers (settings.json) is discovered', async () => {
+  const dir = await tmpdirWith({
+    'settings.json': JSON.stringify({ context_servers: { onto: { command: 'npx', args: ['-y', 'ontomcp-server'] } } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 1);
+  assert.strictEqual(r.summary.servers, 1);
+  assert.strictEqual(r.summary.errors, 0);
+});
+
+node_test('scan: plain Zed settings.json without context_servers is ignored (no false error)', async () => {
+  const dir = await tmpdirWith({
+    'settings.json': JSON.stringify({ theme: 'One Dark', telemetry: { diagnostics: false } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 0, 'a non-MCP settings.json must not count as an MCP config');
+  assert.strictEqual(r.summary.fileErrors, 0, 'and must not produce a parse error');
+});
