@@ -22,6 +22,7 @@ Options:
   --summary         One-line summary (ideal for CI)
   --check-updates   Check pinned npm package versions against the registry (online)
   --check-health    Probe http(s) MCP server URLs for reachability (online)
+  --policy[=file]   Enforce an org policy — deny servers by name/url/command (default .mcp-policy.json)
   --no-color        Disable colored output
   --help            Show this help
   --version         Show version
@@ -37,6 +38,7 @@ Examples:
   mcp-companion --summary       CI-friendly one-liner
   mcp-companion --check-updates Check pinned npx versions against npm
   mcp-companion --check-health  Probe remote MCP server URLs
+  mcp-companion --policy        Enforce deny rules from .mcp-policy.json
   mcp-companion --json          Machine-readable
 `;
 
@@ -92,6 +94,9 @@ function format(result) {
   if (result.checkHealth) {
     found += ` · health: ${summary.healthChecked} probed, ${summary.healthFailed} failed, ${summary.healthSkipped} skipped`;
   }
+  if (result.policy) {
+    found += ` · policy: ${summary.policyDenied} denied`;
+  }
   lines.push(found);
   return lines.join('\n');
 }
@@ -101,6 +106,7 @@ function formatSummary(result) {
   let out = `mcp-companion: ${s.configsFound} config(s), ${s.servers} server(s), ${s.errors} error(s), ${s.warnings} warning(s)`;
   if (result.checkUpdates) out += `, ${s.updatesStale} stale`;
   if (result.checkHealth) out += `, ${s.healthFailed} health-failed`;
+  if (result.policy) out += `, ${s.policyDenied} policy-denied`;
   return out;
 }
 
@@ -116,15 +122,22 @@ async function main() {
   }
 
   const flags = new Set(args.filter((a) => a.startsWith('--')));
-  const positional = args.filter((a) => !a.startsWith('--'));
-  const dir = positional[0] || '.';
+  const nonFlag = args.filter((a) => !a.startsWith('--'));
+  // --policy (no value) → default; --policy=file → explicit policy file.
+  let policy = null;
+  const policyFlag = args.find((a) => a === '--policy' || a.startsWith('--policy='));
+  if (policyFlag) {
+    const eq = policyFlag.indexOf('=');
+    policy = eq !== -1 ? policyFlag.slice(eq + 1) : '.mcp-policy.json';
+  }
+  const dir = nonFlag[0] || '.';
   const json = flags.has('--json');
   const summary = flags.has('--summary');
   const checkUpdates = flags.has('--check-updates');
   const checkHealth = flags.has('--check-health');
 
   try {
-    const result = await scan(dir, { checkUpdates, checkHealth });
+    const result = await scan(dir, { checkUpdates, checkHealth, policy });
     if (json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (summary) {

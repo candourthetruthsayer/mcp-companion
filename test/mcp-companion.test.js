@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const { promises: fs } = require('fs');
 const os = require('os');
 const path = require('path');
-const { scan, checkServer, looksLikeSecret, referencesEnv, compareVersions, isConcretePin, isHttpUrl, checkServerHealth } = require('../lib/scan');
+const { scan, checkServer, looksLikeSecret, referencesEnv, compareVersions, isConcretePin, isHttpUrl, checkServerHealth, matchesAny, applyPolicy } = require('../lib/scan');
 const { format, formatSummary } = require('../index.js');
 
 async function tmpdirWith(files) {
@@ -348,4 +348,65 @@ node_test('scan checkHealth=true: reachable URL clean, failing URL warned', asyn
   assert.ok(servers.find((s) => s.name === 'good').issues.every((i) => i.code !== 'url-unreachable'));
   assert.ok(servers.find((s) => s.name === 'bad').issues.some((i) => i.code === 'url-unreachable'));
   assert.ok(!servers.find((s) => s.name === 'ws').issues.some((i) => i.code === 'url-unreachable'));
+});
+
+// --- org-policy deny mode (--policy) ---
+
+node_test('matchesAny: * glob matches, no match returns false', () => {
+  assert.strictEqual(matchesAny('untrusted-prod', ['untrusted-*']), true);
+  assert.strictEqual(matchesAny('safe', ['untrusted-*']), false);
+  assert.strictEqual(matchesAny('https://evil.example.com/x', ['https://evil.example.com/*']), true);
+  assert.strictEqual(matchesAny('x', undefined), false);
+});
+
+node_test('applyPolicy: deny by server name (exact + glob)', () => {
+  const denied = checkServer('untrusted-01', { type: 'stdio', command: 'npx' }, {});
+  assert.strictEqual(applyPolicy(denied, { deny: { names: ['untrusted-*'] } }), true);
+  assert.ok(denied.issues.some((i) => i.code === 'denied-by-policy' && i.severity === 'error'));
+  const allowed = checkServer('my-server', { type: 'stdio', command: 'npx' }, {});
+  assert.strictEqual(applyPolicy(allowed, { deny: { names: ['untrusted-*'] } }), false);
+});
+
+node_test('applyPolicy: deny by server URL pattern', () => {
+  const s = checkServer('evil', { type: 'http', url: 'https://evil.example.com/mcp' }, {});
+  assert.strictEqual(applyPolicy(s, { deny: { urls: ['https://evil.example.com/*'] } }), true);
+});
+
+node_test('applyPolicy: deny by command array prefix', () => {
+  const s = checkServer('suspicious', { type: 'stdio', command: 'npx', args: ['-y', 'suspicious-package'] }, {});
+  assert.strictEqual(applyPolicy(s, { deny: { commands: [['npx', '-y', 'suspicious-package']] } }), true);
+  const ok = checkServer('fine', { type: 'stdio', command: 'npx', args: ['-y', 'good-package'] }, {});
+  assert.strictEqual(applyPolicy(ok, { deny: { commands: [['npx', '-y', 'suspicious-package']] } }), false);
+});
+
+node_test('scan --policy inline object: denied server flagged, clean server not', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({
+      mcpServers: {
+        'untrusted-prod': { type: 'stdio', command: 'npx', args: ['-y', 'pkg'] },
+        good: { type: 'http', url: 'https://good.example.com' },
+      },
+    }),
+  });
+  const policy = { deny: { names: ['untrusted-*'], urls: ['https://evil.example.com/*'] } };
+  const r = await scan(dir, { policy });
+  assert.strictEqual(r.summary.policyDenied, 1);
+  assert.strictEqual(r.policy, true);
+  const servers = r.configs[0].servers;
+  assert.ok(servers.find((s) => s.name === 'untrusted-prod').issues.some((i) => i.code === 'denied-by-policy'));
+  assert.ok(!servers.find((s) => s.name === 'good').issues.some((i) => i.code === 'denied-by-policy'));
+});
+
+node_test('scan --policy default: reads .mcp-policy.json from the target dir', async () => {
+  const dir = await tmpdirWith({
+    '.mcp.json': JSON.stringify({ mcpServers: { danger: { type: 'http', url: 'https://deny.example.com/mcp' } } }),
+    '.mcp-policy.json': JSON.stringify({ deny: { urls: ['https://deny.example.com/*'] } }),
+  });
+  const r = await scan(dir, { policy: '.mcp-policy.json' });
+  assert.strictEqual(r.summary.policyDenied, 1);
+});
+
+node_test('scan --policy missing file: throws a clear error', async () => {
+  const dir = await tmpdirWith({ '.mcp.json': JSON.stringify({ mcpServers: {} }) });
+  await assert.rejects(() => scan(dir, { policy: 'does-not-exist.json' }), /policy file not found/);
 });

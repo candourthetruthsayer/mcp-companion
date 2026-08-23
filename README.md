@@ -25,6 +25,7 @@ MCP is exploding — ~97M monthly SDK downloads, 10,000+ public servers, 41% of 
 | **error** | Unknown transport type (valid: `stdio`, `http`, `streamable-http`, `sse`, `ws`) |
 | **error** | Stdio server missing `command`; http/sse/ws server missing `url` |
 | **error** | Entry with no determinable transport; unparseable/invalid config file |
+| **error** | **Denied by org policy** (`--policy`): server matches a deny rule (name/url/command) |
 | **warning** | **Deprecated SSE transport** (MCP 2025-06 spec → migrate to HTTP) |
 | **warning** | Reserved server name `workspace` (client skips it at startup) |
 | **warning** | **Hardcoded credential** in `env`/`headers` — should be `${VAR}` expansion |
@@ -41,10 +42,28 @@ mcp-companion ./my-app        Check a specific project
 mcp-companion --summary       CI-friendly one-liner
 mcp-companion --check-updates Check pinned npx versions against npm (online)
 mcp-companion --check-health  Probe http(s) server URLs for reachability (online)
+mcp-companion --policy        Enforce deny rules from .mcp-policy.json in the target dir
+mcp-companion --policy=file   Enforce deny rules from an explicit policy file
 mcp-companion --json          Machine-readable output
 ```
 
 Both online checks (`--check-updates`, `--check-health`) are **opt-in**: they make network calls, so by default — and in CI — the tool stays fast, deterministic, and offline. Use them when you want to catch stale npx pins or dead remote server endpoints.
+
+### Org-policy deny mode
+
+`--policy` enforces a deny list so an org can block known-bad servers. It's read from `.mcp-policy.json` in the scanned directory by default, or from an explicit file with `--policy=file.json`:
+
+```json
+{
+  "deny": {
+    "names": ["untrusted-*"],
+    "urls": ["https://evil.example.com/*"],
+    "commands": [["npx", "-y", "suspicious-package"]]
+  }
+}
+```
+
+Any server matching a name glob, URL glob, or command-array prefix is flagged as an **error** (`denied-by-policy`) — blocking CI. Deny-list rules run locally and need no network.
 
 **Exit codes:**
 - `0` — clean (no errors or warnings)
