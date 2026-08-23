@@ -410,3 +410,26 @@ node_test('scan --policy missing file: throws a clear error', async () => {
   const dir = await tmpdirWith({ '.mcp.json': JSON.stringify({ mcpServers: {} }) });
   await assert.rejects(() => scan(dir, { policy: 'does-not-exist.json' }), /policy file not found/);
 });
+
+// regression: .claude/settings.local.json is a permissions file, not an mcpServers
+// source — it must NOT be scanned (was causing a false "missing mcpServers" error).
+node_test('scan: bare .claude/settings.local.json is ignored (not an MCP source)', async () => {
+  const dir = await tmpdirWith({
+    '.claude/settings.local.json': JSON.stringify({ permissions: { allow: ['Bash(*)'] } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 0, 'no real MCP config should be found');
+  assert.strictEqual(r.summary.fileErrors, 0, 'no false parse error from a permissions file');
+  assert.strictEqual(r.summary.servers, 0);
+});
+
+node_test('scan: .mcp.json still found alongside a permissions file', async () => {
+  const dir = await tmpdirWith({
+    '.claude/settings.local.json': JSON.stringify({ permissions: { allow: ['Bash(*)'] } }),
+    '.mcp.json': JSON.stringify({ mcpServers: { github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' } } }),
+  });
+  const r = await scan(dir);
+  assert.strictEqual(r.summary.configsFound, 1);
+  assert.strictEqual(r.summary.servers, 1);
+  assert.strictEqual(r.summary.errors, 0);
+});
